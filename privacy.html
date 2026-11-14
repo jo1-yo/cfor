@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Privacy | Cloudflare Onramp</title>
+<link rel="icon" href="icons/icon128.png">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="nav"><a class="brand" href="./"><span class="o"></span>Cloudflare Onramp</a></header>
+<main class="doc">
+  <h1>Privacy</h1>
+  <p>Last updated 14 November 2026.</p>
+  <h2>What the extension reads</h2>
+  <p>CF Onramp runs on Cloudflare pages and on claude.ai. To ring the right control it reads the visible labels of buttons, links and fields on the page. It never reads what you type: for a field it only checks whether it is empty.</p>
+  <h2>What leaves your browser</h2>
+  <ul>
+    <li><strong>Written guides:</strong> nothing about the page. Only which step of which guide you reached, with a random ID that is not tied to you.</li>
+    <li><strong>Live guidance and Find it:</strong> when you ask for it, the labels of the visible controls, the page headings and the page path are sent to the CF Onramp server so an AI model can choose the next control. Email addresses and account IDs are removed first.</li>
+  </ul>
+  <h2>Where it goes</h2>
+  <p>The CF Onramp server runs on Cloudflare Workers. Model calls go to Cloudflare Workers AI through AI Gateway, which keeps a log of requests. Nothing is sold or shared with anyone else, and nothing is used for advertising.</p>
+  <h2>What stays on your device</h2>
+  <p>Your progress and the guide you are on are kept in the extension's local storage. Removing the extension removes them.</p>
+  <h2>Contact</h2>
+  <p>Use the support link on the Chrome Web Store listing.</p>
+</main>
+<footer>Independent project, not affiliated with Cloudflare.</footer>
+</body>
+</html>
