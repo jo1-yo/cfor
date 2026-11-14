@@ -306,10 +306,11 @@
     .sp{flex:1}
     .q{color:var(--muted);font-size:13px}
     .q:hover{color:var(--ink)}
-    .pill{height:28px;padding:0 14px;border-radius:14px;background:var(--ink);color:var(--paper);font-size:13px;font-weight:600;text-align:center;white-space:nowrap}
-    .pill.soft{background:var(--fill);color:var(--ink)}
-    .mark{display:block;width:20px;height:20px;border-radius:50%;background:var(--ink);position:relative;margin-top:14px}
-    .mark::after{content:"";position:absolute;left:6.5px;top:5px;width:5px;height:8px;border:solid #fff;border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+    .pill{height:28px;padding:0 14px;border-radius:14px;background:#fff;color:var(--ink);font-size:13px;font-weight:600;text-align:center;white-space:nowrap;box-shadow:0 0 0 .5px rgba(0,0,0,.16),0 1px 2px rgba(0,0,0,.1),0 4px 12px rgba(0,0,0,.07);transition:box-shadow .15s ease}
+    .pill:hover{box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.12),0 8px 18px rgba(0,0,0,.1)}
+    .pill.soft,.pill.soft:hover{background:var(--fill);color:var(--ink);box-shadow:none}
+    .mark{display:block;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 0 0 .5px rgba(0,0,0,.16),0 1px 2px rgba(0,0,0,.1),0 4px 12px rgba(0,0,0,.07);position:relative;margin-top:14px}
+    .mark::after{content:"";position:absolute;left:6.5px;top:5px;width:5px;height:8px;border:solid var(--ink);border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
     .mark+.say{margin-top:10px}
     .busy{display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid var(--faint);border-top-color:var(--ink);animation:spin .8s linear infinite;vertical-align:-2px;margin-right:7px}
     @keyframes spin{to{transform:rotate(360deg)}}

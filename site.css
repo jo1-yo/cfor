@@ -43,8 +43,8 @@ h1 { margin: 0; font-size: clamp(38px, 6vw, 62px); line-height: 1.06; font-weigh
 .n { display: block; margin-bottom: 14px; color: var(--faint); font-size: 14px; font-variant-numeric: tabular-nums; }
 h2 { margin: 0; font-size: 17px; line-height: 1.35; font-weight: 500; letter-spacing: -.01em; color: rgba(0, 0, 0, .86); }
 .step p, .ways p { margin: 6px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
-.btn { display: inline-flex; align-items: center; height: 38px; margin-top: 20px; padding: 0 18px; border-radius: 19px; background: rgba(0, 0, 0, .86); color: #fff; font-size: 14px; font-weight: 500; text-decoration: none; transition: background .15s; }
-.btn:hover { background: #000; }
+.btn { display: inline-flex; align-items: center; height: 38px; margin-top: 20px; padding: 0 18px; border-radius: 19px; background: #fff; color: var(--ink); font-size: 14px; font-weight: 500; text-decoration: none; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .14), 0 1px 2px rgba(0, 0, 0, .08), 0 8px 22px rgba(60, 50, 40, .09); transition: box-shadow .15s; }
+.btn:hover { box-shadow: 0 0 0 .5px rgba(0, 0, 0, .2), 0 2px 4px rgba(0, 0, 0, .1), 0 12px 28px rgba(60, 50, 40, .14); }
 .chip { display: inline; padding: 1px 6px; border: 0; border-radius: 5px; background: var(--fill); color: var(--ink); font-size: .84em; text-decoration: none; cursor: pointer; user-select: text; -webkit-user-select: text; }
 .chip:hover { background: rgba(0, 0, 0, .08); }
 .said { margin-left: 6px; font-size: 13px; }
@@ -62,7 +62,7 @@ h2 { margin: 0; font-size: 17px; line-height: 1.35; font-weight: 500; letter-spa
 .crx-btn.ghost { width: 74px; }
 .mark { position: relative; border-radius: 9px; box-shadow: var(--ringed); }
 .crx-btn.mark { border-radius: 14px; }
-.mark::after { content: attr(data-n); position: absolute; top: -9px; left: -9px; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, .82); color: #fff; font-size: 10.5px; font-weight: 500; }
+.mark::after { content: attr(data-n); position: absolute; top: -9px; left: -9px; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: var(--ink); box-shadow: 0 0 0 .5px rgba(0, 0, 0, .2), 0 1px 3px rgba(0, 0, 0, .14); font-size: 10.5px; font-weight: 600; }
 
 /* live demo: the one object on the page */
 .stage { max-width: 1120px; margin: 0 auto; padding: clamp(84px, 15vh, 150px) 40px 0; }
