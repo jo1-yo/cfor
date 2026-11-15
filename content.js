@@ -31,7 +31,8 @@
   const S = { ready: false, session: null, progress: {}, gen: {}, device: '', auto: { muted: false, seen: {} }, voice: { used: false, sound: false }, canVoice: false };
   const G = { key: '', el: null, lostAt: 0, assist: null, live: { busy: false, last: null, error: null }, inputTimer: null, scrolled: false, cardKey: '', lastHref: '' };
   const P = { open: false, q: '', sel: 0, product: null, drafting: false };
-  const V = { state: 'idle', note: null, seq: 0, spokeKey: '', leadUntil: 0 }; // asking: idle | listening | thinking; note: the answer on show
+  // asking: idle | listening | thinking; note: the answer on show; talk: a spoken conversation is going (the mic reopens after each reply)
+  const V = { state: 'idle', note: null, seq: 0, spokeKey: '', leadUntil: 0, talk: false, turns: [], turnsAt: 0, saying: Promise.resolve() };
 
   // ---------- storage + api ----------
   const store = { get: (k) => chrome.storage.local.get(k), set: (o) => chrome.storage.local.set(o) };
@@ -45,13 +46,37 @@
   const voice = (op, extra) => Promise.resolve().then(() => chrome.runtime.sendMessage({ type: 'onramp:voice', op, ...extra })).catch(() => null);
   function speak(text, queue) {
     text = squash(text).slice(0, 280);
-    if (S.voice.sound && text) voice('say', { text, queue: !!queue });
+    if (S.voice.sound && text) V.saying = V.saying.then(() => voice('say', { text, queue: !!queue }));
   }
   // With the voice on, each new step is read out once.
   function speakStep(key, text) {
     if (key === V.spokeKey) return;
     V.spokeKey = key;
-    if (V.state === 'idle' && !V.note) speak(text, Date.now() < V.leadUntil);
+    if (V.state !== 'idle' || V.note) return;
+    speak(text, Date.now() < V.leadUntil);
+    converse();
+  }
+  // A conversation, not one question: when it has finished speaking, the microphone opens again by itself.
+  // It ends when you say stop, press End, or say nothing.
+  async function converse() {
+    if (!V.talk) return;
+    const seq = V.seq;
+    await V.saying;
+    await voice('idle');
+    await new Promise((r) => setTimeout(r, 250)); // let the last syllable die away, so it does not hear itself
+    if (seq === V.seq && V.talk && V.state === 'idle') listen(true);
+  }
+  function setTalk(on) {
+    V.talk = on;
+    if (!on) V.turns = [];
+    store.set({ talk: on ? { at: Date.now(), turns: V.turns, leadUntil: V.leadUntil } : null });
+  }
+  function remember(q, a) {
+    if (!q || !a) return;
+    if (Date.now() - V.turnsAt > 300000) V.turns = [];
+    V.turns = [...V.turns, { q: q.slice(0, 200), a: a.slice(0, 260) }].slice(-4);
+    V.turnsAt = Date.now();
+    if (V.talk) setTalk(true);
   }
 
   // ---------- guides ----------
@@ -96,6 +121,7 @@
     if (V.state === 'listening') voice('cancel');
     if (S.voice.used) voice('hush');
     V.seq++; V.state = 'idle'; V.note = null;
+    if (V.talk) setTalk(false);
     setSession(null);
   }
 
@@ -331,7 +357,11 @@
     .heard{margin-top:12px;font-size:12px;line-height:1.4;color:var(--muted)}
     .ans{margin-top:5px;font-size:14.5px;line-height:1.44;letter-spacing:-.006em}
     .top+.ans{margin-top:12px}
-    .live{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid var(--ink);margin-right:9px;vertical-align:-.5px;animation:pulse 1.3s ease-in-out infinite}
+    .live{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid var(--ink);margin-right:8px;animation:pulse 1.3s ease-in-out infinite}
+    .hear{display:flex;align-items:center;margin-top:14px;min-height:22px;font-size:13px;font-weight:500}
+    .hl{display:inline-flex;align-items:center}
+    .hl .busy{margin-right:8px;vertical-align:0}
+    .hear+.foot{margin-top:8px}
     @keyframes pulse{50%{transform:scale(.6);opacity:.35}}
     .ctx{flex:1;min-width:0;font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .count{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -426,15 +456,17 @@
   // ---------- the card ----------
   // m: { i, n, where, say, detail, code, tip, mark, busy, actions: [[act, label, kind]] }
   // While it listens, thinks or shows an answer, that takes the card over; the ring stays where it was.
+  // The step (or the last answer) stays on the card, with one line under it that says it is listening or thinking.
   function voiceCard(m) {
-    if (V.state === 'listening') return { ctx: m.ctx, live: true, bare: true, say: 'Listening', detail: S.session ? 'Ask about this step, or say next.' : 'Say what you want to do on Cloudflare.', actions: [['vcancel', 'Cancel', 'q'], ['vsend', 'Send', 'pill']] };
-    if (V.state === 'thinking') return { ctx: m.ctx, busy: true, bare: true, say: 'Thinking', actions: [] };
-    if (V.note) return { ctx: m.ctx, heard: V.note.heard, ans: V.note.say, actions: [['unnote', S.session ? 'Back to step' : 'Close', 'pill']] };
-    return m;
+    const busy = V.state !== 'idle';
+    let out = m;
+    if (V.note) out = { ctx: m.ctx, heard: V.note.heard, ans: V.note.say, actions: busy ? [] : [['unnote', S.session ? 'Back to step' : 'Close', 'pill']] };
+    else if (!S.session && busy) out = { ctx: m.ctx, say: 'What do you want to do?', actions: [] };
+    return busy ? { ...out, hear: V.state } : out;
   }
   function renderCard(m, anchored) {
     m = voiceCard(m);
-    const tools = !S.canVoice || m.bare ? '' : (S.voice.used ? `<button class="ic" data-act="sound" aria-label="${S.voice.sound ? 'Turn the voice off' : 'Turn the voice on'}" title="${S.voice.sound ? 'Voice on' : 'Voice off'}">${S.voice.sound ? ICON.on : ICON.off}</button>` : '') + micButton();
+    const tools = !S.canVoice ? '' : (S.voice.used ? `<button class="ic" data-act="sound" aria-label="${S.voice.sound ? 'Turn the voice off' : 'Turn the voice on'}" title="${S.voice.sound ? 'Voice on' : 'Voice off'}">${S.voice.sound ? ICON.on : ICON.off}</button>` : '') + (m.hear ? '' : micButton());
     const key = JSON.stringify(m) + anchored + tools.length + S.voice.sound;
     card.classList.toggle('dock', !anchored);
     if (key === G.cardKey) return;
@@ -443,10 +475,14 @@
     if (m.mark) h += `<span class="mark"></span>`;
     if (m.heard) h += `<div class="heard">“${esc(m.heard)}”</div>`;
     if (m.ans) h += `<div class="ans">${esc(m.ans)}</div>`;
-    if (m.say) h += `<div class="say">${m.busy ? '<span class="busy"></span>' : m.live ? '<span class="live"></span>' : ''}${esc(m.say)}</div>`;
+    if (m.say) h += `<div class="say">${m.busy ? '<span class="busy"></span>' : ''}${esc(m.say)}</div>`;
     if (m.detail) h += `<div class="detail">${esc(m.detail)}</div>`;
     if (m.code) h += `<pre class="code">${esc(m.code)}</pre>`;
     if (m.tip) h += `<div class="tip">${esc(m.tip)}</div>`;
+    if (m.hear) {
+      h += `<div class="hear">${m.hear === 'listening' ? '<button class="hl" data-act="vsend" title="Send now"><span class="live"></span>Listening</button>' : '<span class="hl"><span class="busy"></span>Thinking</span>'}`
+        + `<span class="sp"></span><button class="q" data-act="vend">End</button></div>`;
+    }
     const quiet = m.actions.filter((a) => a[2] === 'q'), pills = m.actions.filter((a) => a[2] !== 'q');
     if (m.actions.length) {
       h += `<div class="foot">${quiet.map((a) => `<button class="q" data-act="${a[0]}">${esc(a[1])}</button>`).join('')}<span class="sp"></span>`
@@ -687,25 +723,36 @@
     window: 'Allow the microphone in the small window that opened, then tap the mic again.',
     nomic: 'No microphone was found.',
   };
+  // Closes the answer and ends any conversation.
   function quiet() {
     if (V.state === 'listening') voice('cancel');
     if (S.voice.used) voice('hush');
     V.seq++; V.state = 'idle'; V.note = null;
+    if (V.talk) setTalk(false);
     tick();
   }
-  async function listen() {
+  // Ends the conversation but leaves what is on the card.
+  function endTalk() {
+    if (V.state === 'listening') voice('cancel');
+    V.seq++; V.state = 'idle';
+    if (V.talk) setTalk(false);
+    tick();
+  }
+  // again: the microphone reopening by itself in a conversation, as opposed to a tap on the mic.
+  async function listen(again) {
     if (V.state !== 'idle' || !S.canVoice) return;
     if (P.open) closePalette();
     mount();
     const seq = ++V.seq;
-    voice('hush');
+    if (!again) { voice('hush'); V.note = null; setTalk(true); }
     if (!S.voice.used) { S.voice = { used: true, sound: true }; store.set({ voice: S.voice }); } // once you talk to it, it talks back
-    V.note = null; V.state = 'listening'; tick();
+    V.state = 'listening'; tick();
     const r = await voice('listen');
     if (seq !== V.seq) return;
     if (r?.ok && r.audio) return ask('', r.audio);
     V.state = 'idle';
-    if (r?.ok) V.note = { heard: '', say: 'I did not hear anything. Tap the mic and try again.' };
+    setTalk(false); // nobody spoke, or no microphone: the conversation rests until the mic is tapped again
+    if (r?.ok) { if (!again) V.note = { heard: '', say: 'I did not hear anything. Tap the mic and try again.' }; }
     else if (r?.error !== 'cancelled') V.note = { heard: '', say: MIC[r?.where === 'window' ? 'window' : r?.error] || 'The microphone is not available here.' };
     tick();
   }
@@ -720,7 +767,9 @@
     const was = S.session, step = was && was.track !== 'live' ? stepsFor(was.product, was.track)[was.idx] : null;
     let r;
     try {
-      r = await api('/api/ask', { ...(audio ? { audio } : { q }), at: was ? { product: was.product, say: step?.say || G.live.last?.say || '', detail: step?.detail || step?.tip || '' } : null });
+      if (Date.now() - V.turnsAt > 300000) V.turns = [];
+      r = await api('/api/ask', { ...(audio ? { audio } : { q }), history: V.turns,
+        at: was ? { product: was.product, say: step?.say || G.live.last?.say || '', detail: step?.detail || step?.tip || '' } : null });
     } catch (e) {
       r = { kind: 'answer', heard: q, say: e.message === 'offline' ? 'Ask is offline right now.' : e.message };
     }
@@ -736,15 +785,18 @@
       V.spokeKey = ''; // "repeat", or anything else: say the step again
       return tick();
     }
+    remember(r.heard || q, r.kind === 'none' ? '' : r.say);
     if (r.kind === 'guide' && byId[r.product] && r.product !== ses?.product) {
       S.auto.muted = false; S.auto.seen[r.product] = true; store.set({ auto: S.auto });
       speak(r.say); V.leadUntil = Date.now() + 9000; V.spokeKey = '';
+      if (V.talk) setTalk(true); // keep the conversation across the page load a guide may cause
       const routes = routesFor(r.product);
       return startGuide(r.product, routes.includes(r.track) ? r.track : routes.includes('click') ? 'click' : routes[0] || 'live', true, true);
     }
     V.note = { heard: r.heard || q, say: r.say || 'I did not catch that.' };
     speak(V.note.say);
     tick();
+    converse();
   }
   function liveAgain() {
     const ses = S.session;
@@ -768,7 +820,8 @@
       if (S.voice.sound) V.spokeKey = ''; else voice('hush'); // turning it on reads the current step
       return tick();
     }
-    if (act === 'vcancel' || act === 'unnote' || (act === 'stop' && !ses)) return quiet();
+    if (act === 'vend') return endTalk();
+    if (act === 'unnote' || (act === 'stop' && !ses)) return quiet();
     if (!ses) return;
     const list = stepsFor(ses.product, ses.track), step = list[ses.idx];
     if (act === 'stop') { if (ses.track === 'live' || ses.idx < list.length) { S.auto.muted = true; store.set({ auto: S.auto }); } stopGuide(); }
@@ -953,7 +1006,9 @@
   }, 150);
 
   (async () => {
-    const d = await store.get(['session', 'progress', 'gen', 'device', 'wantPalette', 'auto', 'voice']);
+    const d = await store.get(['session', 'progress', 'gen', 'device', 'wantPalette', 'auto', 'voice', 'talk']);
+    // A guide you asked for can reload the page on its way; a conversation that was going a moment ago carries on.
+    if (d.talk && Date.now() - d.talk.at < 90000) { V.talk = true; V.turns = d.talk.turns || []; V.turnsAt = d.talk.at; V.leadUntil = d.talk.leadUntil || 0; }
     S.voice = { used: !!d.voice?.used, sound: !!d.voice?.sound };
     voice('can').then((r) => { S.canVoice = !!r?.ok; if (P.open && !P.product) renderPalette(); });
     S.progress = d.progress || {}; S.gen = d.gen || {}; S.session = d.session || null;
@@ -966,5 +1021,5 @@
   })();
 
   window.__onramp = { auto: () => S.auto, open: openPalette, close: closePalette, start: startGuide, stop: stopGuide, ask, listen, quiet,
-    voice: () => ({ state: V.state, note: V.note, can: S.canVoice, ...S.voice, pointer: !!cur?.classList.contains('on') }), state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
+    voice: () => ({ state: V.state, note: V.note, talk: V.talk, turns: V.turns.length, can: S.canVoice, ...S.voice, pointer: !!cur?.classList.contains('on') }), state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
 })();

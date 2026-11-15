@@ -55,7 +55,7 @@
             for (const v of buf) sum += v * v;
             if (sum > 0) me.signal = true; // a real microphone is never perfectly silent; all zeros means levels cannot be read here
             if (Math.sqrt(sum / buf.length) > 0.018) { me.spoke = true; quietSince = 0; } else if (!quietSince) quietSince = now;
-            if (me.spoke && quietSince && now - quietSince > 1100) return stop();
+            if (me.spoke && quietSince && now - quietSince > 850) return stop();
             if (me.signal && !me.spoke && now - t0 > 7000) return stop();
           }
           if (now - t0 > maxMs) stop();
@@ -77,10 +77,13 @@
   const cancel = () => end('cancelled');
 
   // ---------- speaking: a small queue of lines ----------
-  let queue = [], playing = null;
+  let queue = [], playing = null, idlers = [];
+  const settle = () => { if (!playing && !queue.length) { for (const f of idlers.splice(0)) f(); } };
+  // Resolves when nothing is being said and nothing is waiting to be said.
+  const idle = () => new Promise((resolve) => { idlers.push(resolve); settle(); });
   function next() {
     const item = queue.shift();
-    if (!item) { playing = null; return; }
+    if (!item) { playing = null; settle(); return; }
     let over = false;
     const done = () => { if (!over) { over = true; if (playing === me) next(); } };
     const a = new Audio(item.url);
@@ -110,7 +113,8 @@
     queue = [];
     if (playing) { playing.a.onended = playing.a.onerror = null; try { playing.a.pause(); } catch {} playing = null; }
     try { self.speechSynthesis?.cancel(); } catch {}
+    settle();
   }
 
-  self.OnrampVoice = { listen, stop: send, cancel, say, hush, can: () => !!(navigator.mediaDevices?.getUserMedia && self.MediaRecorder) };
+  self.OnrampVoice = { listen, stop: send, cancel, say, hush, idle, can: () => !!(navigator.mediaDevices?.getUserMedia && self.MediaRecorder) };
 })();

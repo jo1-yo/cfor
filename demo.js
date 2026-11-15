@@ -113,6 +113,7 @@
           if (!v) return { ok: false, error: 'unsupported' };
           if (msg.op === 'can') return { ok: v.can() };
           if (msg.op === 'listen') return v.listen();
+          if (msg.op === 'idle') { await v.idle(); return { ok: true }; }
           if (msg.op === 'say') v.say({ url: API + '/api/say?t=' + encodeURIComponent(msg.text), text: msg.text }, msg.queue);
           else if (typeof v[msg.op] === 'function') v[msg.op]();
           return { ok: true };
