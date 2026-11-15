@@ -67,6 +67,15 @@ h2 { margin: 0; font-size: 17px; line-height: 1.35; font-weight: 500; letter-spa
 /* live demo: the one object on the page */
 .stage { max-width: 1120px; margin: 0 auto; padding: clamp(84px, 15vh, 150px) 40px 0; }
 .cap { margin: 0 0 22px; text-align: center; color: var(--muted); font-size: 14px; }
+/* ask: one quiet field above the demo; what you ask plays out in the frame below */
+.askbar { display: flex; align-items: center; gap: 2px; max-width: 520px; height: 48px; margin: 0 auto; padding: 0 7px; border-radius: 24px; background: #fff; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .12), 0 1px 2px rgba(0, 0, 0, .06), 0 10px 30px rgba(60, 50, 40, .08); transition: box-shadow .15s; }
+.askbar:focus-within { box-shadow: 0 0 0 .5px rgba(0, 0, 0, .26), 0 1px 2px rgba(0, 0, 0, .08), 0 12px 34px rgba(60, 50, 40, .12); }
+.askbar input { flex: 1; min-width: 0; height: 100%; padding: 0 8px; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 15px; }
+.askbar input::placeholder { color: var(--faint); }
+.askic { flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 17px; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; transition: background .15s, color .15s; }
+.askic:hover { background: var(--fill); color: var(--ink); }
+.askic[hidden] { display: none; }
+.askic[hidden] + input { padding-left: 14px; }
 .frame { position: relative; height: 640px; border-radius: 18px; overflow: hidden; background: var(--raised); box-shadow: var(--lift); display: flex; flex-direction: column; font-size: 14px; line-height: 1.4; }
 .frame .bar { flex: none; display: flex; justify-content: center; padding: 11px 14px; border-bottom: .5px solid var(--hair); }
 .addr { max-width: 100%; padding: 4px 14px; border-radius: 8px; background: var(--fill); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -115,12 +124,13 @@ h2 { margin: 0; font-size: 17px; line-height: 1.35; font-weight: 500; letter-spa
 .home .c button, .home .c input { margin: 0 6px; align-self: flex-start; }
 .home .c input { width: calc(100% - 12px); }
 
-.try { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; margin-top: 26px; }
-.try button { padding: 0; border: 0; background: none; color: var(--muted); font-size: 14px; cursor: pointer; transition: color .15s; }
-.try button:hover { color: var(--ink); }
+.try, .asks { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 26px; }
+.asks { margin: 16px 0 34px; }
+.try button, .asks button { padding: 0; border: 0; background: none; color: var(--muted); font-size: 14px; cursor: pointer; transition: color .15s; }
+.try button:hover, .asks button:hover { color: var(--ink); }
 
-/* three ways, said plainly */
-.ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 56px; max-width: 1000px; margin: 0 auto; padding: clamp(84px, 15vh, 150px) 40px 0; }
+/* four ways, said plainly */
+.ways { display: grid; grid-template-columns: repeat(4, 1fr); gap: 44px; max-width: 1080px; margin: 0 auto; padding: clamp(84px, 15vh, 150px) 40px 0; }
 
 footer { max-width: 1120px; margin: 0 auto; padding: clamp(96px, 16vh, 160px) 40px 44px; color: var(--faint); font-size: 13px; text-align: center; }
 footer a { color: var(--muted); }

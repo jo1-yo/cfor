@@ -53,6 +53,7 @@
       <div class="row"><button>Cancel</button><button class="pri" data-nav="/turnstile/widget">Create</button></div>`,
     '/turnstile/widget': () => `<h1>Widget created</h1><h2>Site Key</h2><p>0x4AAAAAAA-demo</p><h2>Secret Key</h2><p>Hidden in this demo</p>`,
     '/r2/overview': () => `<h1>R2 Object Storage</h1><p>Store files without egress fees.</p><div class="row"><button class="pri" id="newr2">Create bucket</button></div>`,
+    '/r2/default/buckets/onramp-files': () => `<h1>onramp-files</h1><p>Bucket created.</p><div class="row"><button class="pri" id="upload">Upload</button><button>Create directory</button></div><div class="empty" id="objects">No objects yet</div>`,
     '/workers/queues': () => `<h1>Queues</h1><p>Send and receive messages reliably.</p><div class="row"><button class="pri" id="newq">Create queue</button></div><div class="empty">No queues yet</div>`,
   };
   const SITES = {
@@ -96,7 +97,8 @@
     else if (t.id === 'addentry') add(`<h2>Add entry</h2><label for="kk">Key</label><input id="kk" name="key"><label for="kv">Value</label><input id="kv" name="value"><div class="row"><button data-x>Cancel</button><button class="pri" id="saveentry">Add entry</button></div>`);
     else if (t.id === 'saveentry') { const k = document.getElementById('kk').value || 'greeting'; closeDlg(); document.getElementById('entries').textContent = k + ' saved'; }
     else if (t.id === 'newq') add(`<h2>Create queue</h2><label for="qn">Queue name</label><input id="qn"><div class="row"><button data-x>Cancel</button><button class="pri" data-x>Create</button></div>`);
-    else if (t.id === 'newr2') add(`<h2>Create a bucket</h2><label for="bn">Bucket name</label><input id="bn"><div class="row"><button data-x>Cancel</button><button class="pri" data-x>Create bucket</button></div>`);
+    else if (t.id === 'newr2') add(`<h2>Create a bucket</h2><label for="bn">Bucket name</label><input id="bn"><div class="row"><button data-x>Cancel</button><button class="pri" data-nav="/r2/default/buckets/onramp-files">Create bucket</button></div>`);
+    else if (t.id === 'upload') document.getElementById('objects').textContent = 'hello.txt uploaded';
     else if (t.id === 'console') document.getElementById('sql').innerHTML = '<input aria-label="SQL" style="width:100%" placeholder="SELECT 1"><div class="row"><button class="pri">Execute</button></div>';
     else if (t.matches('[data-x]')) closeDlg();
   });
@@ -106,6 +108,15 @@
       id: 'demo',
       onMessage: { addListener() {} },
       async sendMessage(msg) {
+        if (msg?.type === 'onramp:voice') { // on the website the page itself holds the mic and the speaker
+          const v = window.OnrampVoice;
+          if (!v) return { ok: false, error: 'unsupported' };
+          if (msg.op === 'can') return { ok: v.can() };
+          if (msg.op === 'listen') return v.listen();
+          if (msg.op === 'say') v.say({ url: API + '/api/say?t=' + encodeURIComponent(msg.text), text: msg.text }, msg.queue);
+          else if (typeof v[msg.op] === 'function') v[msg.op]();
+          return { ok: true };
+        }
         if (msg?.type !== 'onramp:api') return;
         try {
           const res = await fetch(API + msg.path, msg.body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(msg.body) } : undefined);
@@ -131,6 +142,15 @@
     window.__onramp.start(id, 'click', true);
   }
   document.querySelector('.try').addEventListener('click', (e) => { const b = e.target.closest('[data-demo]'); if (b) play(b.dataset.demo); });
+  // Ask bar: the question goes to the same engine as the extension's picker and mic; the answer plays out in the frame.
+  const askq = document.getElementById('askq'), askmic = document.getElementById('askmic');
+  const showFrame = () => frame.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  function askDemo(q) { window.__onramp.close(); window.__onramp.ask(q); askq.value = ''; showFrame(); }
+  document.getElementById('askbar').addEventListener('submit', (e) => { e.preventDefault(); if (askq.value.trim()) askDemo(askq.value); });
+  document.querySelector('.asks').addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) askDemo(b.dataset.ask); });
+  askmic.addEventListener('click', () => { window.__onramp.close(); window.__onramp.listen(); showFrame(); });
+  if (!window.OnrampVoice?.can()) askmic.hidden = true;
+  if (matchMedia('(max-width: 480px)').matches) askq.placeholder = 'Ask how to do something';
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-copy-from]');
     if (!b) return;

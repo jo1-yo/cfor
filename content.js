@@ -1,6 +1,6 @@
-// Onramp, on the page: a picker to choose a Cloudflare product, then an orange ring
-// around the control to act on with a short note beside it. Reads control labels only;
-// never reads what you type (input steps only check "is it non-empty").
+// Onramp, on the page: pick a Cloudflare product or ask for what you want (typed or spoken), then a ring
+// around the control to act on, a pointer that glides to it, and a short note beside it. Reads control
+// labels only; never reads what you type (input steps only check "is it non-empty"). It never clicks for you.
 (() => {
   if (window.__onrampLoaded) return;
   window.__onrampLoaded = true;
@@ -28,9 +28,10 @@
   const WHERE = { terminal: 'Terminal', claude: 'Claude Code' };
   const SUPPORTED = /^https:\/\/([\w-]+\.)*(cloudflare\.com|cloudflare\.app)\/|^https:\/\/claude\.ai\//;
 
-  const S = { ready: false, session: null, progress: {}, gen: {}, device: '', auto: { muted: false, seen: {} } };
+  const S = { ready: false, session: null, progress: {}, gen: {}, device: '', auto: { muted: false, seen: {} }, voice: { used: false, sound: false }, canVoice: false };
   const G = { key: '', el: null, lostAt: 0, assist: null, live: { busy: false, last: null, error: null }, inputTimer: null, scrolled: false, cardKey: '', lastHref: '' };
   const P = { open: false, q: '', sel: 0, product: null, drafting: false };
+  const V = { state: 'idle', note: null, seq: 0, spokeKey: '', leadUntil: 0 }; // asking: idle | listening | thinking; note: the answer on show
 
   // ---------- storage + api ----------
   const store = { get: (k) => chrome.storage.local.get(k), set: (o) => chrome.storage.local.set(o) };
@@ -38,6 +39,19 @@
     const r = await chrome.runtime.sendMessage({ type: 'onramp:api', path, body });
     if (!r || !r.ok) throw new Error(r?.error || 'offline');
     return r.data;
+  }
+  // The microphone and the speaker live outside the page (the extension's own hidden page, or the website in the demo):
+  // the Cloudflare dashboard does not let a script on the page use the microphone.
+  const voice = (op, extra) => Promise.resolve().then(() => chrome.runtime.sendMessage({ type: 'onramp:voice', op, ...extra })).catch(() => null);
+  function speak(text, queue) {
+    text = squash(text).slice(0, 280);
+    if (S.voice.sound && text) voice('say', { text, queue: !!queue });
+  }
+  // With the voice on, each new step is read out once.
+  function speakStep(key, text) {
+    if (key === V.spokeKey) return;
+    V.spokeKey = key;
+    if (V.state === 'idle' && !V.note) speak(text, Date.now() < V.leadUntil);
   }
 
   // ---------- guides ----------
@@ -71,14 +85,19 @@
     api('/api/progress', { device: S.device, product: ses.product, track: ses.track, step: idx, total: n }).catch(() => {});
   }
   const advance = () => setIdx(S.session.idx + 1);
-  function startGuide(product, track, fresh) {
+  function startGuide(product, track, fresh, asked) {
     G.live = { busy: false, last: null, error: null };
     const n = stepsFor(product, track).length;
     let idx = track === 'live' || fresh ? 0 : S.progress[pkey(product, track)] || 0;
     if (idx >= n) idx = 0;
-    setSession({ product, track, idx, history: [] });
+    setSession({ product, track, idx, history: [], ...(asked ? { asked: true } : {}) });
   }
-  const stopGuide = () => setSession(null);
+  function stopGuide() {
+    if (V.state === 'listening') voice('cancel');
+    if (S.voice.used) voice('hush');
+    V.seq++; V.state = 'idle'; V.note = null;
+    setSession(null);
+  }
 
   // Which guide belongs to the page you are looking at.
   function pageProduct() {
@@ -269,7 +288,15 @@
   }
 
   // ---------- overlay ----------
-  let host, rootEl, ring, card, fab, scrim, pal;
+  let host, rootEl, ring, cur, card, fab, scrim, pal;
+  const svg = (d) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICON = {
+    mic: svg('<rect x="5.7" y="1.7" width="4.6" height="8" rx="2.3"/><path d="M3.3 7.6a4.7 4.7 0 0 0 9.4 0M8 12.4v2"/>'),
+    on: svg('<path d="M2.4 6.3h2.2L7.9 3.6v8.8L4.6 9.7H2.4z"/><path d="M10.3 6a2.9 2.9 0 0 1 0 4M12.1 4.3a5.4 5.4 0 0 1 0 7.4"/>'),
+    off: svg('<path d="M2.4 6.3h2.2L7.9 3.6v8.8L4.6 9.7H2.4z"/><path d="M10.7 6.3l3 3.4M13.7 6.3l-3 3.4"/>'),
+  };
+  const POINTER = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M5 3v15.2l4-3.7 2.8 6.3 2.5-1.1-2.8-6.3 5.5-.3z" fill="#fff" stroke="rgba(0,0,0,.8)" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+  const micButton = () => `<button class="ic" data-act="mic" aria-label="Ask by voice" title="Ask by voice">${ICON.mic}</button>`;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const CSS_TEXT = `
     :host{all:initial}
@@ -291,7 +318,21 @@
       transition:opacity .2s ease,transform .2s ease,left .2s ease,top .2s ease}
     .card.on{opacity:1;transform:none;pointer-events:auto}
     .card.dock{width:344px}
+    .cur{position:absolute;left:0;top:0;width:24px;height:24px;margin:-3px 0 0 -5px;pointer-events:none;opacity:0;filter:drop-shadow(0 2px 5px rgba(0,0,0,.3));transition:left .2s ease,top .2s ease,opacity .25s ease}
+    .cur.on{opacity:1}
+    .cur.glide{transition:left .62s cubic-bezier(.3,.7,.2,1),top .62s cubic-bezier(.3,.7,.2,1),opacity .25s ease}
+    .cur svg{display:block;transform-origin:5px 3px}
+    .cur.tap svg{animation:tap .34s ease}
+    @keyframes tap{45%{transform:scale(.78)}}
     .top{display:flex;align-items:center;gap:8px;height:22px}
+    .ic{flex:none;width:24px;height:24px;margin:0 -3px;border-radius:12px;display:grid;place-items:center;color:var(--muted)}
+    .ic:hover{background:var(--fill);color:var(--ink)}
+    .ic svg{display:block}
+    .heard{margin-top:12px;font-size:12px;line-height:1.4;color:var(--muted)}
+    .ans{margin-top:5px;font-size:14.5px;line-height:1.44;letter-spacing:-.006em}
+    .top+.ans{margin-top:12px}
+    .live{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid var(--ink);margin-right:9px;vertical-align:-.5px;animation:pulse 1.3s ease-in-out infinite}
+    @keyframes pulse{50%{transform:scale(.6);opacity:.35}}
     .ctx{flex:1;min-width:0;font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .count{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
     .x{flex:none;position:relative;width:22px;height:22px;margin-right:-5px;border-radius:11px}
@@ -324,7 +365,9 @@
     .pal{position:absolute;left:50%;top:max(72px,17%);width:min(620px,calc(100% - 32px));max-height:min(560px,70%);transform:translate(-50%,8px) scale(.985);
       border-radius:22px;overflow:hidden;display:flex;flex-direction:column;pointer-events:none;visibility:hidden;opacity:0;transition:opacity .18s ease,transform .18s ease,visibility 0s .18s}
     .pal.on{opacity:1;transform:translate(-50%,0);pointer-events:auto;visibility:visible;transition:opacity .18s ease,transform .18s ease}
-    .pal input{flex:none;width:100%;height:62px;padding:0 24px;border:0;border-bottom:.5px solid var(--hair);background:transparent;color:var(--ink);caret-color:var(--ink);font:inherit;font-size:18px;letter-spacing:-.01em;outline:none}
+    .ask{flex:none;display:flex;align-items:center;padding-right:20px;border-bottom:.5px solid var(--hair)}
+    .ask .ic{width:30px;height:30px;border-radius:15px;margin:0}
+    .pal input{flex:1;min-width:0;height:62px;padding:0 24px;border:0;background:transparent;color:var(--ink);caret-color:var(--ink);font:inherit;font-size:18px;letter-spacing:-.01em;outline:none}
     .pal input::placeholder{color:var(--faint)}
     .phead{flex:none;display:flex;align-items:center;gap:8px;height:62px;padding:0 16px;border-bottom:.5px solid var(--hair)}
     .phead .t{font-size:18px;font-weight:600;letter-spacing:-.015em}
@@ -343,7 +386,7 @@
     .meta{flex:none;color:var(--muted);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
     .none{padding:26px 24px;color:var(--muted)}
     .links{flex:none;display:flex;gap:20px;padding:13px 24px 15px;border-top:.5px solid var(--hair)}
-    @media (prefers-reduced-motion:reduce){.ring.on,.busy{animation:none}.ring,.card,.pal,.scrim{transition:none}}
+    @media (prefers-reduced-motion:reduce){.ring.on,.busy,.live,.cur.tap svg{animation:none}.ring,.card,.pal,.scrim,.cur,.cur.glide{transition:none}}
   `;
 
   function mount() {
@@ -353,9 +396,10 @@
     host.id = 'onramp-root';
     host.style.cssText = `position:${frame ? 'absolute' : 'fixed'};inset:0;pointer-events:none;z-index:2147483647;`;
     const sh = host.attachShadow({ mode: 'closed' });
-    sh.innerHTML = `<style>${CSS_TEXT}</style><div class="root"><div class="ring"></div><div class="card glass"></div><button class="fab glass" aria-label="CF Onramp: pick a product" title="CF Onramp"><i></i></button><div class="scrim"></div><div class="pal glass"></div></div>`;
+    sh.innerHTML = `<style>${CSS_TEXT}</style><div class="root"><div class="ring"></div><div class="cur">${POINTER}</div><div class="card glass"></div><button class="fab glass" aria-label="CF Onramp: pick a product" title="CF Onramp"><i></i></button><div class="scrim"></div><div class="pal glass"></div></div>`;
     rootEl = sh.querySelector('.root');
     ring = sh.querySelector('.ring');
+    cur = sh.querySelector('.cur');
     card = sh.querySelector('.card');
     fab = sh.querySelector('.fab');
     fab.addEventListener('click', openPalette);
@@ -381,14 +425,25 @@
 
   // ---------- the card ----------
   // m: { i, n, where, say, detail, code, tip, mark, busy, actions: [[act, label, kind]] }
+  // While it listens, thinks or shows an answer, that takes the card over; the ring stays where it was.
+  function voiceCard(m) {
+    if (V.state === 'listening') return { ctx: m.ctx, live: true, bare: true, say: 'Listening', detail: S.session ? 'Ask about this step, or say next.' : 'Say what you want to do on Cloudflare.', actions: [['vcancel', 'Cancel', 'q'], ['vsend', 'Send', 'pill']] };
+    if (V.state === 'thinking') return { ctx: m.ctx, busy: true, bare: true, say: 'Thinking', actions: [] };
+    if (V.note) return { ctx: m.ctx, heard: V.note.heard, ans: V.note.say, actions: [['unnote', S.session ? 'Back to step' : 'Close', 'pill']] };
+    return m;
+  }
   function renderCard(m, anchored) {
-    const key = JSON.stringify(m) + anchored;
+    m = voiceCard(m);
+    const tools = !S.canVoice || m.bare ? '' : (S.voice.used ? `<button class="ic" data-act="sound" aria-label="${S.voice.sound ? 'Turn the voice off' : 'Turn the voice on'}" title="${S.voice.sound ? 'Voice on' : 'Voice off'}">${S.voice.sound ? ICON.on : ICON.off}</button>` : '') + micButton();
+    const key = JSON.stringify(m) + anchored + tools.length + S.voice.sound;
     card.classList.toggle('dock', !anchored);
     if (key === G.cardKey) return;
     G.cardKey = key;
-    let h = `<div class="top"><span class="ctx">${esc(m.ctx || '')}</span>${m.count ? `<span class="count">${esc(m.count)}</span>` : ''}<button class="x" data-act="stop" aria-label="Close"></button></div>`;
+    let h = `<div class="top"><span class="ctx">${esc(m.ctx || '')}</span>${m.count ? `<span class="count">${esc(m.count)}</span>` : ''}${tools}<button class="x" data-act="stop" aria-label="Close"></button></div>`;
     if (m.mark) h += `<span class="mark"></span>`;
-    h += `<div class="say">${m.busy ? '<span class="busy"></span>' : ''}${esc(m.say)}</div>`;
+    if (m.heard) h += `<div class="heard">“${esc(m.heard)}”</div>`;
+    if (m.ans) h += `<div class="ans">${esc(m.ans)}</div>`;
+    if (m.say) h += `<div class="say">${m.busy ? '<span class="busy"></span>' : m.live ? '<span class="live"></span>' : ''}${esc(m.say)}</div>`;
     if (m.detail) h += `<div class="detail">${esc(m.detail)}</div>`;
     if (m.code) h += `<pre class="code">${esc(m.code)}</pre>`;
     if (m.tip) h += `<div class="tip">${esc(m.tip)}</div>`;
@@ -416,7 +471,7 @@
     const b = bounds();
     const cw = card.offsetWidth, ch = card.offsetHeight;
     if (!el) { // docked: bottom right
-      ring.classList.remove('on');
+      ring.classList.remove('on'); cur.classList.remove('on');
       card.style.left = Math.max(12, b.w - cw - 28) + 'px';
       card.style.top = b.h - ch - 28 + 'px';
       return;
@@ -429,6 +484,20 @@
     ring.style.width = r.width + pad * 2 + 'px'; ring.style.height = r.height + pad * 2 + 'px';
     if (fresh) { void ring.offsetWidth; ring.style.transition = ''; }
     ring.classList.add('on');
+    // The pointer glides to each new control, the way someone showing you would move the mouse. It only points.
+    if (G.curEl !== el) {
+      G.curEl = el;
+      if (!cur.style.left) { // first time: come in from the corner
+        cur.style.transition = 'none';
+        cur.style.left = b.w - 80 + 'px'; cur.style.top = b.h - 80 + 'px';
+        void cur.offsetWidth; cur.style.transition = '';
+      }
+      cur.classList.add('glide');
+      clearTimeout(G.curTimer);
+      G.curTimer = setTimeout(() => { cur.classList.remove('glide'); cur.classList.add('tap'); setTimeout(() => cur.classList.remove('tap'), 360); }, 660);
+    }
+    cur.style.left = x + r.width - Math.min(10, r.width * .3) + 'px'; cur.style.top = y + r.height - Math.min(7, r.height * .3) + 'px';
+    cur.classList.add('on');
     // Sit next to the control on whichever side covers the fewest other controls.
     const clampX = (v) => Math.min(Math.max(10, v), b.w - cw - 10), clampY = (v) => Math.min(Math.max(10, v), b.h - ch - 10);
     const spots = [
@@ -451,12 +520,18 @@
     }
     card.style.left = G.spot[0] + 'px'; card.style.top = G.spot[1] + 'px';
   }
-  function hideGuide() { ring?.classList.remove('on'); card?.classList.remove('on'); G.cardKey = ''; }
+  function hideGuide() { ring?.classList.remove('on'); cur?.classList.remove('on'); card?.classList.remove('on'); G.cardKey = ''; }
 
   // ---------- the loop ----------
   function tick() {
     if (document.visibilityState !== 'visible' || !S.ready) return;
     if (!S.session && !P.open) {
+      if (V.state !== 'idle' || V.note) { // asked with no guide running: the card sits in the corner while it listens and answers
+        mount(); fab.classList.remove('on');
+        renderCard({ ctx: 'CF Onramp', say: '', actions: [] }, false);
+        card.classList.add('on');
+        return place(null);
+      }
       if (autoStart()) return;
       if (!onCloudflare()) { if (host) { hideGuide(); fab.classList.remove('on'); } return; }
       mount(); theme(); hideGuide();
@@ -475,13 +550,14 @@
       const others = routesFor(p.id).filter((t) => t !== ses.track && t !== 'live');
       renderCard({ ctx: p.name, mark: true, say: guideFor(p.id)?.goal || p.name, detail: 'Done.',
         actions: [...others.map((t) => ['route:' + t, 'Try ' + ROUTES[t][0], 'soft']), ['stop', 'Close', 'pill']] }, false);
+      speakStep(p.id + '/' + ses.track + '/done', 'Done. ' + (guideFor(p.id)?.goal || ''));
       card.classList.add('on');
       return place(null);
     }
 
     const step = list[ses.idx];
     const key = p.id + '/' + ses.track + '/' + ses.idx;
-    if (key !== G.key) { resetStep(); G.key = key; }
+    if (key !== G.key) { resetStep(); G.key = key; V.note = null; }
     if (urlDone(step)) return advance();
 
     const onPage = step.at === 'dash' || step.at === 'any';
@@ -506,8 +582,10 @@
       if (step.code) { m.code = step.code; m.actions.push(['copy', 'Copy', 'soft']); }
       if (!step.detail && step.tip) m.detail = step.tip;
       m.actions.push(step.done === 'manual' ? ['next', 'Done', 'pill'] : ['next', 'Skip', 'q']);
+      speakStep(key, m.say + '. ' + (m.detail || ''));
       renderCard(m, true);
     } else if (!onPage) {
+      speakStep(key, step.say + '. ' + (step.detail || ''));
       m.code = step.code; m.tip = step.tip;
       if (step.code) m.actions.push(['copy', 'Copy', 'soft']);
       m.actions.push(['next', 'Done', 'pill']);
@@ -517,6 +595,12 @@
       const lostFor = Date.now() - G.lostAt;
       const here = step.go && urlDone({ ...step, done: step.done?.url ? step.done : { url: '\u0000' } });
       const prevGo = step.go || [...list.slice(0, ses.idx)].reverse().find((s) => s.go)?.go;
+      // A guide you asked for goes to the product's page by itself, once, instead of waiting for a click on Open.
+      if (ses.asked && !ses.went && step.go && !here && lostFor > 700) {
+        ses.went = true; store.set({ session: ses });
+        return openUrl(resolveGo(step.go));
+      }
+      if (lostFor > 900) speakStep(key, step.say + '. ' + (step.detail || ''));
       // The page and our note of it can drift apart (a click that reloaded the page, a shortcut, going on without
       // pressing Done, going back). If a nearby step's control is on screen and this one's is not, move to that step.
       if (step.target && lostFor > 600 && !(step.go && !here)) {
@@ -571,6 +655,7 @@
     else if (L.error) { m.say = L.error; m.actions.push(['live', 'Retry', 'pill']); }
     else {
       m.say = L.last.say; m.detail = L.last.detail && L.last.detail !== L.last.say ? L.last.detail : '';
+      speakStep('live/' + m.say, m.say + '. ' + m.detail);
       if (visible(G.el)) { el = G.el; m.actions.push(['live', 'Skip', 'q']); }
       else {
         if (L.last.done) m.mark = true;
@@ -596,18 +681,103 @@
     G.el = null; tick();
   }
 
+  // ---------- asking, typed or spoken ----------
+  const MIC = {
+    permission: 'Allow the microphone for this site, then tap the mic again.',
+    window: 'Allow the microphone in the small window that opened, then tap the mic again.',
+    nomic: 'No microphone was found.',
+  };
+  function quiet() {
+    if (V.state === 'listening') voice('cancel');
+    if (S.voice.used) voice('hush');
+    V.seq++; V.state = 'idle'; V.note = null;
+    tick();
+  }
+  async function listen() {
+    if (V.state !== 'idle' || !S.canVoice) return;
+    if (P.open) closePalette();
+    mount();
+    const seq = ++V.seq;
+    voice('hush');
+    if (!S.voice.used) { S.voice = { used: true, sound: true }; store.set({ voice: S.voice }); } // once you talk to it, it talks back
+    V.note = null; V.state = 'listening'; tick();
+    const r = await voice('listen');
+    if (seq !== V.seq) return;
+    if (r?.ok && r.audio) return ask('', r.audio);
+    V.state = 'idle';
+    if (r?.ok) V.note = { heard: '', say: 'I did not hear anything. Tap the mic and try again.' };
+    else if (r?.error !== 'cancelled') V.note = { heard: '', say: MIC[r?.where === 'window' ? 'window' : r?.error] || 'The microphone is not available here.' };
+    tick();
+  }
+  // Sends the question (or the recording) and acts on the answer: start a guide, move within this one, or show a short answer.
+  async function ask(q, audio) {
+    q = squash(q).slice(0, 300);
+    if (!q && !audio) return;
+    if (P.open) closePalette();
+    mount();
+    const seq = ++V.seq;
+    V.note = null; V.state = 'thinking'; tick();
+    const was = S.session, step = was && was.track !== 'live' ? stepsFor(was.product, was.track)[was.idx] : null;
+    let r;
+    try {
+      r = await api('/api/ask', { ...(audio ? { audio } : { q }), at: was ? { product: was.product, say: step?.say || G.live.last?.say || '', detail: step?.detail || step?.tip || '' } : null });
+    } catch (e) {
+      r = { kind: 'answer', heard: q, say: e.message === 'offline' ? 'Ask is offline right now.' : e.message };
+    }
+    if (seq !== V.seq) return;
+    V.state = 'idle';
+    const ses = S.session;
+    if (r.kind === 'control' && ses) {
+      const live = ses.track === 'live';
+      if (r.control === 'stop') return stopGuide();
+      if (r.control === 'next') return live ? liveAgain() : advance();
+      if (r.control === 'back' && !live) return setIdx(ses.idx - 1);
+      if (r.control === 'open') goNow();
+      V.spokeKey = ''; // "repeat", or anything else: say the step again
+      return tick();
+    }
+    if (r.kind === 'guide' && byId[r.product] && r.product !== ses?.product) {
+      S.auto.muted = false; S.auto.seen[r.product] = true; store.set({ auto: S.auto });
+      speak(r.say); V.leadUntil = Date.now() + 9000; V.spokeKey = '';
+      const routes = routesFor(r.product);
+      return startGuide(r.product, routes.includes(r.track) ? r.track : routes.includes('click') ? 'click' : routes[0] || 'live', true, true);
+    }
+    V.note = { heard: r.heard || q, say: r.say || 'I did not catch that.' };
+    speak(V.note.say);
+    tick();
+  }
+  function liveAgain() {
+    const ses = S.session;
+    if (G.live.last?.say) ses.history = [...(ses.history || []), G.live.last.say].slice(-8);
+    G.live = { busy: false, last: null, error: null }; G.el = null; tick();
+  }
+  function goNow() {
+    const ses = S.session, list = stepsFor(ses.product, ses.track);
+    const go = list[ses.idx]?.go || [...list.slice(0, ses.idx)].reverse().find((s) => s.go)?.go || byId[ses.product]?.dash;
+    if (go) openUrl(resolveGo(go));
+  }
+
   function onCardClick(e) {
     const b = e.target.closest('[data-act]');
-    if (!b || !S.session) return;
+    if (!b) return;
     const act = b.dataset.act, ses = S.session;
+    if (act === 'mic') return void listen();
+    if (act === 'vsend') return void voice('stop');
+    if (act === 'sound') {
+      S.voice.sound = !S.voice.sound; store.set({ voice: S.voice });
+      if (S.voice.sound) V.spokeKey = ''; else voice('hush'); // turning it on reads the current step
+      return tick();
+    }
+    if (act === 'vcancel' || act === 'unnote' || (act === 'stop' && !ses)) return quiet();
+    if (!ses) return;
     const list = stepsFor(ses.product, ses.track), step = list[ses.idx];
     if (act === 'stop') { if (ses.track === 'live' || ses.idx < list.length) { S.auto.muted = true; store.set({ auto: S.auto }); } stopGuide(); }
     else if (act === 'next') advance();
     else if (act === 'back') setIdx(ses.idx - 1);
     else if (act === 'assist') assist();
-    else if (act === 'live') { if (G.live.last?.say && act === 'live') ses.history = [...(ses.history || []), G.live.last.say].slice(-8); G.live = { busy: false, last: null, error: null }; G.el = null; tick(); }
+    else if (act === 'live') liveAgain();
     else if (act === 'dash') openUrl(resolveGo(byId[ses.product].dash));
-    else if (act === 'go') { const go = step.go || [...list.slice(0, ses.idx)].reverse().find((s) => s.go)?.go; if (go) openUrl(resolveGo(go)); }
+    else if (act === 'go') goNow();
     else if (act.startsWith('route:')) startGuide(ses.product, act.slice(6), true);
     else if (act === 'copy') {
       navigator.clipboard.writeText(step?.code || '').then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Select it'; });
@@ -665,7 +835,13 @@
       });
     }
     const item = (p) => ({ act: 'product', id: p.id, name: p.name, blurb: p.blurb, glyph: !!p.guided });
-    if (q) return CATALOG.filter((p) => (p.name + ' ' + p.blurb + ' ' + p.id).toLowerCase().includes(q)).sort((a, b) => (b.guided ? 1 : 0) - (a.guided ? 1 : 0)).map(item);
+    if (q) {
+      const hits = CATALOG.filter((p) => (p.name + ' ' + p.blurb + ' ' + p.id).toLowerCase().includes(q)).sort((a, b) => (b.guided ? 1 : 0) - (a.guided ? 1 : 0)).map(item);
+      if (q.length < 3) return hits;
+      // Anything typed can also be asked: "how do I store files" finds the guide and takes you there.
+      const askRow = { act: 'ask', id: P.q.trim(), name: `Ask “${P.q.trim().slice(0, 60)}”`, blurb: 'Finds the guide and takes you there' };
+      return CATALOG.some((p) => p.name.toLowerCase().includes(q) || p.id === q) ? [...hits, askRow] : [askRow, ...hits];
+    }
     const out = [{ sec: 'Start here' }, ...START.map((id) => byId[id]).filter(Boolean).map(item)];
     for (const c of CATEGORIES) {
       const items = CATALOG.filter((p) => p.category === c);
@@ -698,7 +874,7 @@
       pal.innerHTML = `<div class="phead"><button class="back" data-act="back" aria-label="All products"></button><span class="t">${esc(p.name)}</span></div><div class="list"></div>`
         + `<div class="links">${p.dash ? '<button class="q" data-act="dash">Dashboard</button>' : ''}<button class="q" data-act="docs">Docs</button></div>`;
     } else {
-      pal.innerHTML = `<input type="text" placeholder="Search Cloudflare products" autocomplete="off" spellcheck="false" aria-label="Search Cloudflare products"><div class="list"></div>`;
+      pal.innerHTML = `<div class="ask"><input type="text" placeholder="Search, or ask how to do something" autocomplete="off" spellcheck="false" aria-label="Search Cloudflare products, or ask how to do something">${S.canVoice ? micButton() : ''}</div><div class="list"></div>`;
       const input = pal.querySelector('input');
       input.value = P.q;
       setTimeout(() => input.focus({ preventScroll: true }), 30);
@@ -731,6 +907,7 @@
     const r = palRows[i];
     if (!r) return;
     if (r.act === 'product') return pickProduct(r.id);
+    if (r.act === 'ask') return void ask(r.id);
     const id = P.product;
     closePalette();
     S.auto.muted = false; S.auto.seen[id] = true; store.set({ auto: S.auto });
@@ -740,7 +917,8 @@
     const row = e.target.closest('.row');
     if (row) return choose(+row.dataset.i);
     const act = e.target.closest('[data-act]')?.dataset.act;
-    if (act === 'back') { P.product = null; P.sel = 0; renderPalette(); }
+    if (act === 'mic') listen();
+    else if (act === 'back') { P.product = null; P.sel = 0; renderPalette(); }
     else if (act === 'docs') window.open(byId[P.product].docs, '_blank', 'noopener');
     else if (act === 'dash') { const d = byId[P.product].dash; closePalette(); openUrl(resolveGo(d)); }
   }
@@ -775,7 +953,9 @@
   }, 150);
 
   (async () => {
-    const d = await store.get(['session', 'progress', 'gen', 'device', 'wantPalette', 'auto']);
+    const d = await store.get(['session', 'progress', 'gen', 'device', 'wantPalette', 'auto', 'voice']);
+    S.voice = { used: !!d.voice?.used, sound: !!d.voice?.sound };
+    voice('can').then((r) => { S.canVoice = !!r?.ok; if (P.open && !P.product) renderPalette(); });
     S.progress = d.progress || {}; S.gen = d.gen || {}; S.session = d.session || null;
     S.auto = { muted: !!d.auto?.muted, seen: d.auto?.seen || {} };
     S.ready = true;
@@ -785,5 +965,6 @@
     tick();
   })();
 
-  window.__onramp = { auto: () => S.auto, open: openPalette, close: closePalette, start: startGuide, stop: stopGuide, state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
+  window.__onramp = { auto: () => S.auto, open: openPalette, close: closePalette, start: startGuide, stop: stopGuide, ask, listen, quiet,
+    voice: () => ({ state: V.state, note: V.note, can: S.canVoice, ...S.voice, pointer: !!cur?.classList.contains('on') }), state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
 })();

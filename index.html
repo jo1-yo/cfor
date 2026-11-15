@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>Cloudflare Onramp</title>
-<meta name="description" content="Open the Cloudflare dashboard. CF Onramp circles what to click next.">
+<meta name="description" content="Ask how to do something on Cloudflare. CF Onramp circles what to click next.">
 <link rel="icon" href="icons/icon128.png">
 <link rel="stylesheet" href="site.css">
 </head>
@@ -58,7 +58,21 @@
   </section>
 
   <section class="stage" aria-label="Live demo">
-    <p class="cap">Live demo. Click what is ringed.</p>
+    <p class="cap">Live demo. Ask for what you want, or click what is ringed.</p>
+    <form class="askbar" id="askbar" autocomplete="off">
+      <button type="button" class="askic" id="askmic" aria-label="Ask by voice" title="Ask by voice">
+        <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.7" y="1.7" width="4.6" height="8" rx="2.3"/><path d="M3.3 7.6a4.7 4.7 0 0 0 9.4 0M8 12.4v2"/></svg>
+      </button>
+      <input id="askq" type="text" maxlength="200" placeholder="Ask how to do something on Cloudflare" aria-label="Ask how to do something on Cloudflare">
+      <button class="askic" aria-label="Ask" title="Ask">
+        <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12.6V3.4M4.2 7.2L8 3.4l3.8 3.8"/></svg>
+      </button>
+    </form>
+    <div class="asks">
+      <button data-ask="How do I store files?">“How do I store files?”</button>
+      <button data-ask="I need a database">“I need a database”</button>
+      <button data-ask="What is a Worker?">“What is a Worker?”</button>
+    </div>
     <div class="frame" id="frame">
       <div class="bar"><span class="addr" id="addr"></span></div>
       <div class="dash">
@@ -83,7 +97,8 @@
     </div>
   </section>
 
-  <section class="ways" aria-label="Three ways to follow a guide">
+  <section class="ways" aria-label="Four ways to follow a guide">
+    <div><h2>Ask</h2><p>Say or type what you want. It finds the guide and talks you through it.</p></div>
     <div><h2>Click</h2><p>It circles the button. You click it.</p></div>
     <div><h2>Code</h2><p>It gives the command. You paste it in a terminal.</p></div>
     <div><h2>Agent</h2><p>It gives a prompt. Claude Code does the work.</p></div>
@@ -93,6 +108,7 @@
 <footer>Independent project, not affiliated with Cloudflare. <a href="privacy.html">Privacy</a></footer>
 
 <script src="data/catalog.js"></script>
+<script src="voice.js"></script>
 <script src="demo.js"></script>
 <script src="content.js"></script>
 </body>
