@@ -88,20 +88,8 @@
     const done = () => { if (!over) { over = true; if (playing === me) next(); } };
     const a = new Audio(item.url);
     const me = playing = { a, done };
-    a.onended = done;
-    a.onerror = () => fallback(item, done);
-    a.play().catch(() => fallback(item, done));
-  }
-  // The server voice is unavailable (offline, quota): use the browser's own voice so the guide still talks.
-  function fallback(item, done) {
-    if (!item.text || !self.speechSynthesis || !self.SpeechSynthesisUtterance) return done();
-    try {
-      const u = new SpeechSynthesisUtterance(item.text);
-      u.lang = 'en-US';
-      u.onend = u.onerror = done;
-      item.text = ''; // once only
-      speechSynthesis.speak(u);
-    } catch { done(); }
+    a.onended = a.onerror = done; // no voice available (offline, or today's allowance is used up): stay silent, the words are on the card
+    a.play().catch(done);
   }
   // say({ url, text }, keep): plays the line; unless keep is true, it replaces whatever was being said.
   function say(item, keep) {
@@ -112,7 +100,6 @@
   function hush() {
     queue = [];
     if (playing) { playing.a.onended = playing.a.onerror = null; try { playing.a.pause(); } catch {} playing = null; }
-    try { self.speechSynthesis?.cancel(); } catch {}
     settle();
   }
 

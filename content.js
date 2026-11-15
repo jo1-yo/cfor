@@ -32,7 +32,7 @@
   const G = { key: '', el: null, lostAt: 0, assist: null, live: { busy: false, last: null, error: null }, inputTimer: null, scrolled: false, cardKey: '', lastHref: '' };
   const P = { open: false, q: '', sel: 0, product: null, drafting: false };
   // asking: idle | listening | thinking; note: the answer on show; talk: a spoken conversation is going (the mic reopens after each reply)
-  const V = { state: 'idle', note: null, seq: 0, spokeKey: '', leadUntil: 0, talk: false, turns: [], turnsAt: 0, saying: Promise.resolve() };
+  const V = { state: 'idle', note: null, seq: 0, spokeKey: '', leadUntil: 0, talk: false, turns: [], turnsAt: 0, saying: Promise.resolve(), resting: false };
 
   // ---------- storage + api ----------
   const store = { get: (k) => chrome.storage.local.get(k), set: (o) => chrome.storage.local.set(o) };
@@ -46,9 +46,10 @@
   const voice = (op, extra) => Promise.resolve().then(() => chrome.runtime.sendMessage({ type: 'onramp:voice', op, ...extra })).catch(() => null);
   function speak(text, queue) {
     text = squash(text).slice(0, 280);
-    if (S.voice.sound && text) V.saying = V.saying.then(() => voice('say', { text, queue: !!queue }));
+    if (S.voice.sound && !V.resting && text) V.saying = V.saying.then(() => voice('say', { text, queue: !!queue }));
   }
-  // With the voice on, each new step is read out once.
+  // With the voice on, each new step is read out once: the short instruction only. The reason stays on the card to read.
+  // Those lines are fixed words, so each is made into speech once, ever, and costs nothing after that.
   function speakStep(key, text) {
     if (key === V.spokeKey) return;
     V.spokeKey = key;
@@ -460,14 +461,16 @@
   function voiceCard(m) {
     const busy = V.state !== 'idle';
     let out = m;
-    if (V.note) out = { ctx: m.ctx, heard: V.note.heard, ans: V.note.say, actions: busy ? [] : [['unnote', S.session ? 'Back to step' : 'Close', 'pill']] };
+    if (V.note) out = { ctx: m.ctx, heard: V.note.heard, ans: V.note.say, actions: busy ? [] : [['unnote', S.session ? 'Back to step' : 'Close', 'pill']],
+      ...(V.resting && S.voice.sound && !V.note.plain ? { tip: 'The voice is resting until tomorrow. Answers stay here to read.' } : {}) };
     else if (!S.session && busy) out = { ctx: m.ctx, say: 'What do you want to do?', actions: [] };
     return busy ? { ...out, hear: V.state } : out;
   }
   function renderCard(m, anchored) {
     m = voiceCard(m);
-    const tools = !S.canVoice ? '' : (S.voice.used ? `<button class="ic" data-act="sound" aria-label="${S.voice.sound ? 'Turn the voice off' : 'Turn the voice on'}" title="${S.voice.sound ? 'Voice on' : 'Voice off'}">${S.voice.sound ? ICON.on : ICON.off}</button>` : '') + (m.hear ? '' : micButton());
-    const key = JSON.stringify(m) + anchored + tools.length + S.voice.sound;
+    const loud = S.voice.sound && !V.resting;
+    const tools = !S.canVoice ? '' : (S.voice.used ? `<button class="ic" data-act="sound" aria-label="${S.voice.sound ? 'Turn the voice off' : 'Turn the voice on'}" title="${V.resting ? 'The voice is resting until tomorrow' : loud ? 'Voice on' : 'Voice off'}">${loud ? ICON.on : ICON.off}</button>` : '') + (m.hear ? '' : micButton());
+    const key = JSON.stringify(m) + anchored + tools.length + loud;
     card.classList.toggle('dock', !anchored);
     if (key === G.cardKey) return;
     G.cardKey = key;
@@ -618,10 +621,10 @@
       if (step.code) { m.code = step.code; m.actions.push(['copy', 'Copy', 'soft']); }
       if (!step.detail && step.tip) m.detail = step.tip;
       m.actions.push(step.done === 'manual' ? ['next', 'Done', 'pill'] : ['next', 'Skip', 'q']);
-      speakStep(key, m.say + '. ' + (m.detail || ''));
+      speakStep(key, m.say);
       renderCard(m, true);
     } else if (!onPage) {
-      speakStep(key, step.say + '. ' + (step.detail || ''));
+      speakStep(key, step.say);
       m.code = step.code; m.tip = step.tip;
       if (step.code) m.actions.push(['copy', 'Copy', 'soft']);
       m.actions.push(['next', 'Done', 'pill']);
@@ -636,7 +639,7 @@
         ses.went = true; store.set({ session: ses });
         return openUrl(resolveGo(step.go));
       }
-      if (lostFor > 900) speakStep(key, step.say + '. ' + (step.detail || ''));
+      if (lostFor > 900) speakStep(key, step.say);
       // The page and our note of it can drift apart (a click that reloaded the page, a shortcut, going on without
       // pressing Done, going back). If a nearby step's control is on screen and this one's is not, move to that step.
       if (step.target && lostFor > 600 && !(step.go && !here)) {
@@ -691,7 +694,7 @@
     else if (L.error) { m.say = L.error; m.actions.push(['live', 'Retry', 'pill']); }
     else {
       m.say = L.last.say; m.detail = L.last.detail && L.last.detail !== L.last.say ? L.last.detail : '';
-      speakStep('live/' + m.say, m.say + '. ' + m.detail);
+      speakStep('live/' + m.say, m.say);
       if (visible(G.el)) { el = G.el; m.actions.push(['live', 'Skip', 'q']); }
       else {
         if (L.last.done) m.mark = true;
@@ -771,10 +774,16 @@
       r = await api('/api/ask', { ...(audio ? { audio } : { q }), history: V.turns,
         at: was ? { product: was.product, say: step?.say || G.live.last?.say || '', detail: step?.detail || step?.tip || '' } : null });
     } catch (e) {
-      r = { kind: 'answer', heard: q, say: e.message === 'offline' ? 'Ask is offline right now.' : e.message };
+      r = { kind: 'error', say: e.message === 'offline' ? 'Ask is offline right now.' : e.message };
     }
     if (seq !== V.seq) return;
     V.state = 'idle';
+    if (r.voice) V.resting = r.voice === 'resting';
+    if (r.kind === 'error') { // shown, never spoken or remembered; a conversation cannot go on without it
+      V.note = { heard: audio ? '' : q, say: r.say, plain: true };
+      if (V.talk) setTalk(false);
+      return tick();
+    }
     const ses = S.session;
     if (r.kind === 'control' && ses) {
       const live = ses.track === 'live';
@@ -1021,5 +1030,5 @@
   })();
 
   window.__onramp = { auto: () => S.auto, open: openPalette, close: closePalette, start: startGuide, stop: stopGuide, ask, listen, quiet,
-    voice: () => ({ state: V.state, note: V.note, talk: V.talk, turns: V.turns.length, can: S.canVoice, ...S.voice, pointer: !!cur?.classList.contains('on') }), state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
+    voice: () => ({ state: V.state, note: V.note, talk: V.talk, resting: V.resting, turns: V.turns.length, can: S.canVoice, ...S.voice, pointer: !!cur?.classList.contains('on') }), state: () => ({ session: S.session, card: card?.innerText, ring: ring?.classList.contains('on'), docked: card?.classList.contains('dock'), palette: P.open, rows: palRows.length }), ui: () => ({ card, pal }) };
 })();
