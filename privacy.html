@@ -3,32 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
-<title>Privacy | Cloudflare Onramp</title>
-<link rel="icon" href="icons/icon128.png">
-<link rel="stylesheet" href="site.css">
+<title>Cloudflare Onramp</title>
+<link rel="canonical" href="https://onramp.janezhang555l.workers.dev/privacy.html">
+<meta http-equiv="refresh" content="0; url=https://onramp.janezhang555l.workers.dev/privacy.html">
+<script>location.replace('https://onramp.janezhang555l.workers.dev/privacy.html' + location.search + location.hash);</script>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;color:rgba(0,0,0,.5);background:#fdfbfa}a{color:inherit}</style>
 </head>
-<body>
-<header class="nav"><a class="brand" href="./"><span class="o"></span>Cloudflare Onramp</a></header>
-<main class="doc">
-  <h1>Privacy</h1>
-  <p>Last updated 14 November 2026.</p>
-  <h2>What the extension reads</h2>
-  <p>CF Onramp runs on Cloudflare pages and on claude.ai. To ring the right control it reads the visible labels of buttons, links and fields on the page. It never reads what you type: for a field it only checks whether it is empty.</p>
-  <h2>What leaves your browser</h2>
-  <ul>
-    <li><strong>Written guides:</strong> nothing about the page. Only which step of which guide you reached, with a random ID that is not tied to you.</li>
-    <li><strong>Ask:</strong> when you type a question, the question and the step you are on are sent to the CF Onramp server so an AI model can pick the guide or answer.</li>
-    <li><strong>Voice:</strong> the microphone is on only while the card says Listening. Pressing the mic starts a conversation: after each spoken reply it listens again, until you press End, say stop, or say nothing. Each recording, at most 12 seconds, is sent to the CF Onramp server, turned into text and discarded. It is not stored and not written to any log. Spoken answers are generated from the answer text.</li>
-    <li><strong>Live guidance and Find it:</strong> when you ask for it, the labels of the visible controls, the page headings and the page path are sent to the CF Onramp server so an AI model can choose the next control. Email addresses and account IDs are removed first.</li>
-  </ul>
-  <h2>Where it goes</h2>
-  <p>The CF Onramp server runs on Cloudflare Workers. Model calls go to Cloudflare Workers AI through AI Gateway, which keeps a log of requests. Nothing is sold or shared with anyone else, and nothing is used for advertising.</p>
-  <h2>What stays on your device</h2>
-  <p>Your progress and the guide you are on are kept in the extension's local storage. Removing the extension removes them.</p>
-  <h2>Contact</h2>
-  <p>Use the support link on the Chrome Web Store listing.</p>
-</main>
-<footer>Independent project, not affiliated with Cloudflare.</footer>
-</body>
+<body><p>Cloudflare Onramp has moved to <a href="https://onramp.janezhang555l.workers.dev/privacy.html">onramp.janezhang555l.workers.dev</a>.</p></body>
 </html>
